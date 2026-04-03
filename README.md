@@ -47,6 +47,7 @@ pi_messenger({ action: "join" })
 pi_messenger({ action: "reserve", paths: ["src/auth/"], reason: "Refactoring" })
 pi_messenger({ action: "send", to: "GoldFalcon", message: "auth is done" })
 pi_messenger({ action: "release" })
+pi_messenger({ action: "leave" })
 ```
 
 For multi-agent task orchestration from a PRD:
@@ -67,7 +68,7 @@ pi_messenger({ action: "review", target: "task-1" })    // Reviewer checks imple
 
 **Messaging** - Send messages between agents. Recipients wake up immediately and see the message as a steering prompt.
 
-**File Reservations** - Claim files or directories. Other agents get blocked with a clear message telling them who to coordinate with. Auto-releases on exit.
+**File Reservations** - Claim files or directories. Other agents get blocked with a clear message telling them who to coordinate with. Auto-releases on `leave` or exit.
 
 **Stuck Detection** - Agents idle too long with an open task or reservation are flagged as stuck. Peers get a notification.
 
@@ -251,6 +252,7 @@ Agent definitions live in `crew/agents/` within the extension. To customize one 
 | Action | Description |
 |--------|-------------|
 | `join` | Join the agent mesh |
+| `leave` | Leave the mesh for the current session |
 | `list` | List agents with presence info |
 | `status` | Show your status or crew progress |
 | `whois` | Detailed info about an agent (`name` required) |

@@ -80,7 +80,7 @@ export default function piMessengerExtension(pi: ExtensionAPI) {
   // State & Configuration
   // ===========================================================================
 
-  const config: MessengerConfig = loadConfig(process.cwd());
+  let config: MessengerConfig = loadConfig(process.cwd());
 
   const state: MessengerState = {
     agentName: process.env.PI_AGENT_NAME || "",
@@ -95,6 +95,7 @@ export default function piMessengerExtension(pi: ExtensionAPI) {
     broadcastHistory: [],
     seenSenders: new Map(),
     model: "",
+    cwd: process.cwd(),
     gitBranch: undefined,
     spec: undefined,
     scopeToFolder: config.scopeToFolder,
@@ -337,7 +338,7 @@ export default function piMessengerExtension(pi: ExtensionAPI) {
   // ===========================================================================
 
   function sendRegistrationContext(ctx: ExtensionContext): void {
-    const folder = extractFolder(process.cwd());
+    const folder = extractFolder(ctx.cwd ?? state.cwd);
     const locationPart = state.gitBranch
       ? `${folder} on ${state.gitBranch}`
       : folder;
@@ -360,6 +361,7 @@ export default function piMessengerExtension(pi: ExtensionAPI) {
 Usage (action-based API - preferred):
   // Coordination
   pi_messenger({ action: "join" })                              → Join mesh
+  pi_messenger({ action: "leave" })                             → Leave mesh for this session
   pi_messenger({ action: "status" })                            → Get status
   pi_messenger({ action: "list" })                              → List agents with presence
   pi_messenger({ action: "feed", limit: 20 })                   → Activity feed
@@ -466,6 +468,13 @@ Usage (action-based API - preferred):
 
       if (action === "join" && state.registered && config.registrationContext) {
         sendRegistrationContext(ctx);
+      }
+
+      if (action === "leave" && !state.registered) {
+        overlayHandle?.hide();
+        overlayHandle = null;
+        overlayTui = null;
+        overlayOpening = false;
       }
 
       return result;
@@ -769,6 +778,11 @@ Usage (action-based API - preferred):
 
   pi.on("session_start", async (_event, ctx) => {
     latestCtx = ctx;
+    state.cwd = ctx.cwd ?? process.cwd();
+    config = loadConfig(state.cwd);
+    state.scopeToFolder = config.scopeToFolder;
+    nameTheme.theme = config.nameTheme;
+    nameTheme.customWords = config.nameWords;
     resetAutonomousContinueGuard();
     startStatusHeartbeat();
     for (const entry of ctx.sessionManager.getEntries()) {
@@ -776,7 +790,7 @@ Usage (action-based API - preferred):
         restoreAutonomousState(entry.data as Parameters<typeof restoreAutonomousState>[0]);
       }
     }
-    const { staleCleared } = restorePlanningState(ctx.cwd ?? process.cwd());
+    const { staleCleared } = restorePlanningState(state.cwd);
     if (staleCleared && ctx.hasUI) {
       ctx.ui.notify("Stale planning state cleared (planner process exited)", "warning");
     }
@@ -785,7 +799,7 @@ Usage (action-based API - preferred):
     try { fs.rmSync(join(homedir(), ".pi/agent/messenger/feed.jsonl"), { force: true }); } catch {}
 
     const shouldAutoRegister = config.autoRegister || 
-      matchesAutoRegisterPath(process.cwd(), config.autoRegisterPaths);
+      matchesAutoRegisterPath(state.cwd, config.autoRegisterPaths);
 
     if (!shouldAutoRegister) {
       maybeAutoOpenCrewOverlay(ctx);
@@ -793,7 +807,7 @@ Usage (action-based API - preferred):
     }
 
     if (store.register(state, dirs, ctx, nameTheme)) {
-      const cwd = ctx.cwd ?? process.cwd();
+      const cwd = state.cwd;
       store.startWatcher(state, dirs, deliverMessage);
       updateStatus(ctx);
       pruneFeed(cwd, config.feedRetention);
@@ -889,28 +903,6 @@ Usage (action-based API - preferred):
     });
   }
 
-  pi.on("session_switch", async (_event, ctx) => {
-    latestCtx = ctx;
-    resetAutonomousContinueGuard();
-    const { staleCleared } = restorePlanningState(ctx.cwd ?? process.cwd());
-    if (staleCleared && ctx.hasUI) {
-      ctx.ui.notify("Stale planning state cleared (planner process exited)", "warning");
-    }
-    recoverWatcherIfNeeded();
-    updateStatus(ctx);
-    maybeAutoOpenCrewOverlay(ctx);
-  });
-  pi.on("session_fork", async (_event, ctx) => {
-    latestCtx = ctx;
-    resetAutonomousContinueGuard();
-    const { staleCleared } = restorePlanningState(ctx.cwd ?? process.cwd());
-    if (staleCleared && ctx.hasUI) {
-      ctx.ui.notify("Stale planning state cleared (planner process exited)", "warning");
-    }
-    recoverWatcherIfNeeded();
-    updateStatus(ctx);
-    maybeAutoOpenCrewOverlay(ctx);
-  });
   pi.on("session_tree", async (_event, ctx) => {
     latestCtx = ctx;
     const { staleCleared } = restorePlanningState(ctx.cwd ?? process.cwd());
@@ -1101,7 +1093,12 @@ Usage (action-based API - preferred):
     if (recentTestTimer) { clearTimeout(recentTestTimer); recentTestTimer = null; }
     if (recentEditTimer) { clearTimeout(recentEditTimer); recentEditTimer = null; }
     store.stopWatcher(state);
-    store.unregister(state, dirs);
+    try {
+      store.unregister(state, dirs);
+    } catch {
+      // Safe to ignore during shutdown: the process is exiting, so any leftover
+      // registration will be cleaned up as stale on the next registry read.
+    }
   });
 
   // ===========================================================================

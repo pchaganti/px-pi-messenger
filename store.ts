@@ -167,7 +167,7 @@ export function getRegistrationPath(state: MessengerState, dirs: Dirs): string {
 export function getActiveAgents(state: MessengerState, dirs: Dirs): AgentRegistration[] {
   const now = Date.now();
   const excludeName = state.agentName;
-  const myCwd = normalizeCwd(process.cwd());
+  const myCwd = normalizeCwd(state.cwd);
   const scopeToFolder = state.scopeToFolder;
 
   // Cache key includes scopeToFolder and cwd for proper cache invalidation
@@ -339,7 +339,7 @@ export function register(state: MessengerState, dirs: Dirs, ctx: ExtensionContex
 
     ensureDirSync(getMyInbox(state, dirs));
 
-    const cwd = normalizeCwd(process.cwd());
+    const cwd = normalizeCwd(ctx.cwd ?? process.cwd());
     const gitBranch = getGitBranch(cwd);
     const now = new Date().toISOString();
     const registration: AgentRegistration = {
@@ -378,6 +378,7 @@ export function register(state: MessengerState, dirs: Dirs, ctx: ExtensionContex
     if (verified) {
       state.registered = true;
       state.model = ctx.model?.id ?? "unknown";
+      state.cwd = cwd;
       state.gitBranch = gitBranch;
       state.activity.lastActivityAt = now;
       invalidateAgentsCache();
@@ -426,6 +427,7 @@ export function updateRegistration(state: MessengerState, dirs: Dirs, ctx: Exten
     const currentModel = ctx.model?.id ?? reg.model;
     reg.model = currentModel;
     state.model = currentModel;
+    reg.cwd = state.cwd;
     reg.reservations = state.reservations.length > 0 ? state.reservations : undefined;
     if (state.spec) {
       reg.spec = state.spec;
@@ -452,6 +454,7 @@ export function flushActivityToRegistry(state: MessengerState, dirs: Dirs, ctx: 
     const currentModel = ctx.model?.id ?? reg.model;
     reg.model = currentModel;
     state.model = currentModel;
+    reg.cwd = state.cwd;
     reg.session = { ...state.session };
     reg.activity = { ...state.activity };
     reg.statusMessage = state.statusMessage;
@@ -464,11 +467,15 @@ export function flushActivityToRegistry(state: MessengerState, dirs: Dirs, ctx: 
 export function unregister(state: MessengerState, dirs: Dirs): void {
   if (!state.registered) return;
 
+  const regPath = getRegistrationPath(state, dirs);
   try {
-    fs.unlinkSync(getRegistrationPath(state, dirs));
-  } catch {
-    // Ignore errors
+    fs.unlinkSync(regPath);
+  } catch (error) {
+    if (fs.existsSync(regPath)) {
+      throw error;
+    }
   }
+
   state.registered = false;
   invalidateAgentsCache();
 }
@@ -515,7 +522,7 @@ export function renameAgent(
 
   processAllPendingMessages(state, dirs, deliverFn);
 
-  const cwd = normalizeCwd(process.cwd());
+  const cwd = normalizeCwd(ctx.cwd ?? process.cwd());
   const gitBranch = getGitBranch(cwd);
   const now = new Date().toISOString();
   const registration: AgentRegistration = {
@@ -598,6 +605,7 @@ export function renameAgent(
   }
 
   state.model = ctx.model?.id ?? "unknown";
+  state.cwd = cwd;
   state.gitBranch = gitBranch;
   state.sessionStartedAt = now;
   state.activity.lastActivityAt = now;
