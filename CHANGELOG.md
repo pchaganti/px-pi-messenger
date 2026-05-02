@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- Migrated extension tool schemas from `@sinclair/typebox` to `typebox` 1.x and updated the local test/tsconfig references to the new package entry.
+
+### Changed
+- Added `typebox` as a runtime dependency for packaged installs.
+
 ## [0.14.1] - 2026-04-04
 
 ### Changed

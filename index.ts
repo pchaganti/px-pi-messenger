@@ -11,7 +11,7 @@ import { join } from "node:path";
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import type { OverlayHandle, TUI } from "@mariozechner/pi-tui";
 import { truncateToWidth } from "@mariozechner/pi-tui";
-import { Type, type TUnsafe } from "@sinclair/typebox";
+import { Type, type TUnsafe } from "typebox";
 
 function StringEnum<T extends readonly string[]>(
   values: T,

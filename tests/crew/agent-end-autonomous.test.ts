@@ -11,7 +11,7 @@ vi.mock("@mariozechner/pi-tui", () => ({
   visibleWidth: (value: string) => value.length,
 }));
 
-vi.mock("@sinclair/typebox", () => ({
+vi.mock("typebox", () => ({
   Type: {
     Unsafe: (schema: unknown) => schema,
     Optional: (schema: unknown) => schema,
