@@ -228,64 +228,73 @@ export default function piMessengerExtension(pi: ExtensionAPI) {
   // ===========================================================================
 
   function updateStatus(ctx: ExtensionContext): void {
-    if (!ctx.hasUI || !state.registered) return;
+    try {
+      if (!ctx.hasUI || !state.registered) return;
 
-    checkStuckAgents(ctx);
+      checkStuckAgents(ctx);
 
-    const agents = store.getActiveAgents(state, dirs);
-    const activeNames = new Set(agents.map(a => a.name));
-    const count = agents.length;
-    const theme = ctx.ui.theme;
+      const agents = store.getActiveAgents(state, dirs);
+      const activeNames = new Set(agents.map(a => a.name));
+      const count = agents.length;
+      const theme = ctx.ui.theme;
 
-    for (const name of state.unreadCounts.keys()) {
-      if (!activeNames.has(name)) {
-        state.unreadCounts.delete(name);
-      }
-    }
-    for (const name of notifiedStuck) {
-      if (!activeNames.has(name)) {
-        notifiedStuck.delete(name);
-      }
-    }
-
-    // Sum remaining unread counts
-    let totalUnread = 0;
-    for (const n of state.unreadCounts.values()) totalUnread += n;
-
-    const nameStr = theme.fg("accent", state.agentName);
-    const countStr = theme.fg("dim", ` (${count} peer${count === 1 ? "" : "s"})`);
-    const unreadStr = totalUnread > 0 ? theme.fg("accent", ` ●${totalUnread}`) : "";
-
-    const planningCwd = ctx.cwd ?? process.cwd();
-    const planningStr =
-      isPlanningForCwd(planningCwd)
-        ? theme.fg(
-            "warning",
-            ` · plan ${planningState.pass}/${planningState.maxPasses} ${planningState.phase}${isPlanningStalled(planningCwd) ? " stalled" : ""}`,
-          )
-        : "";
-
-    const activityStr = !planningStr && state.activity.currentActivity
-      ? theme.fg("dim", ` · ${state.activity.currentActivity}`)
-      : "";
-
-    // Add crew status if autonomous mode is active
-    let crewStr = "";
-    if (autonomousState.active) {
-      const cwd = ctx.cwd ?? process.cwd();
-      const plan = crewStore.getPlan(cwd);
-      if (plan) {
-        const workerCount = getLiveWorkers(cwd).size;
-        crewStr = theme.fg("accent", ` ⚡${plan.completed_count}/${plan.task_count}`);
-        if (workerCount > 0) {
-          crewStr += theme.fg("dim", ` 🔨${workerCount}`);
+      for (const name of state.unreadCounts.keys()) {
+        if (!activeNames.has(name)) {
+          state.unreadCounts.delete(name);
         }
       }
+      for (const name of notifiedStuck) {
+        if (!activeNames.has(name)) {
+          notifiedStuck.delete(name);
+        }
+      }
+
+      // Sum remaining unread counts
+      let totalUnread = 0;
+      for (const n of state.unreadCounts.values()) totalUnread += n;
+
+      const nameStr = theme.fg("accent", state.agentName);
+      const countStr = theme.fg("dim", ` (${count} peer${count === 1 ? "" : "s"})`);
+      const unreadStr = totalUnread > 0 ? theme.fg("accent", ` ●${totalUnread}`) : "";
+
+      const planningCwd = ctx.cwd ?? process.cwd();
+      const planningStr =
+        isPlanningForCwd(planningCwd)
+          ? theme.fg(
+              "warning",
+              ` · plan ${planningState.pass}/${planningState.maxPasses} ${planningState.phase}${isPlanningStalled(planningCwd) ? " stalled" : ""}`,
+            )
+          : "";
+
+      const activityStr = !planningStr && state.activity.currentActivity
+        ? theme.fg("dim", ` · ${state.activity.currentActivity}`)
+        : "";
+
+      // Add crew status if autonomous mode is active
+      let crewStr = "";
+      if (autonomousState.active) {
+        const cwd = ctx.cwd ?? process.cwd();
+        const plan = crewStore.getPlan(cwd);
+        if (plan) {
+          const workerCount = getLiveWorkers(cwd).size;
+          crewStr = theme.fg("accent", ` ⚡${plan.completed_count}/${plan.task_count}`);
+          if (workerCount > 0) {
+            crewStr += theme.fg("dim", ` 🔨${workerCount}`);
+          }
+        }
+      }
+
+      ctx.ui.setStatus("messenger", `msg: ${nameStr}${countStr}${unreadStr}${planningStr}${activityStr}${crewStr}`);
+
+      maybeAutoOpenCrewOverlay(ctx);
+    } catch (error) {
+      if (!(error instanceof Error) || !error.message.includes("extension ctx is stale")) {
+        throw error;
+      }
+
+      latestCtx = null;
+      stopStatusHeartbeat();
     }
-
-    ctx.ui.setStatus("messenger", `msg: ${nameStr}${countStr}${unreadStr}${planningStr}${activityStr}${crewStr}`);
-
-    maybeAutoOpenCrewOverlay(ctx);
   }
 
   function clearAllUnreadCounts(): void {
@@ -327,6 +336,11 @@ export default function piMessengerExtension(pi: ExtensionAPI) {
     if (!statusHeartbeatTimer) return;
     clearInterval(statusHeartbeatTimer);
     statusHeartbeatTimer = null;
+  }
+
+  function captureStatusContext(ctx: ExtensionContext): void {
+    latestCtx = ctx;
+    startStatusHeartbeat();
   }
 
   onLiveWorkersChanged(() => {
@@ -448,7 +462,7 @@ Usage (action-based API - preferred):
 
     async execute(_toolCallId, rawParams, signal, _onUpdate, ctx) {
       const params = rawParams as CrewParams;
-      latestCtx = ctx;
+      captureStatusContext(ctx);
 
       const action = params.action;
       if (!action) {
@@ -490,6 +504,7 @@ Usage (action-based API - preferred):
   pi.registerCommand("messenger", {
     description: "Open messenger overlay, or 'config' to manage settings",
     handler: async (args, ctx) => {
+      captureStatusContext(ctx);
       if (!ctx.hasUI) return;
 
       // /messenger config - open config overlay
@@ -779,7 +794,7 @@ Usage (action-based API - preferred):
   // ===========================================================================
 
   pi.on("session_start", async (_event, ctx) => {
-    latestCtx = ctx;
+    captureStatusContext(ctx);
     state.cwd = ctx.cwd ?? process.cwd();
     config = loadConfig(state.cwd);
     state.scopeToFolder = config.scopeToFolder;
@@ -906,7 +921,7 @@ Usage (action-based API - preferred):
   }
 
   pi.on("session_tree", async (_event, ctx) => {
-    latestCtx = ctx;
+    captureStatusContext(ctx);
     const { staleCleared } = restorePlanningState(ctx.cwd ?? process.cwd());
     if (staleCleared && ctx.hasUI) {
       ctx.ui.notify("Stale planning state cleared (planner process exited)", "warning");
@@ -916,7 +931,7 @@ Usage (action-based API - preferred):
   });
 
   pi.on("turn_end", async (event, ctx) => {
-    latestCtx = ctx;
+    captureStatusContext(ctx);
     store.processAllPendingMessages(state, dirs, deliverMessage);
     const lobbyId = process.env.PI_LOBBY_ID;
     if (lobbyId) {
@@ -1071,6 +1086,7 @@ Usage (action-based API - preferred):
   });
 
   pi.on("session_shutdown", async () => {
+    latestCtx = null;
     shutdownLobbyWorkers(process.cwd());
     shutdownAllWorkers();
     stopStatusHeartbeat();
